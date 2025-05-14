@@ -1,1 +1,27 @@
-Beischreibe in einem kurzen Satz, was in dem Bild zu sehen ist.
+Deine Aufgabe ist es, Termine aus einem Bild von einem Wochenplan zu extrahieren.
+Extrahiere alle Termine aus diesem wochenplan und schreibe sie in ein JSON.
+Wenn Uhrzeiten dabei stehen, übernimm diese. Termine können eine start und endzeit haben.
+Es gibt verschiedene Arten von Terminen: Termin, Abwesenheit, Workout und Aufgabe.
+Wenn bei einem Termin nur ein Name steht und keine weitere Beschreibung steht, handelt es sich um eine Abwesenheit.
+Wenn "name: aufgabe" geschrieben steht, handelt es sich um eine Aufgabe.
+Ein Eintrag kann immer nur eine Aufgabe enthalten.
+Die laminierten Karten sind Workouts. Bei Workouts soll nur der Titel als Beschreibung übernommen werden.
+
+Als Auflösung für die Wochentage nutze:
+Montag - 12.05.25
+Dienstag - 13.05.25
+Mittwoch - 14.05.25
+Donnerstag - 15.05.25
+Freitag - 16.05.25
+Samstag - 17.05.25
+Sonntag - 18.05.25
+
+Das JSON-Ausgabeformat sieht wie folgt aus:
+[
+    {"type": "appointment", "date": "2025-05-12", "start": "14:00", "end": null, "person": "ellen", "description": "zahnarzt"},
+    {"type": "task", "date": "2025-05-12", "start": null, "end": null, "person": "finn", "description": "kochen"},
+    {"type": "workout", "date": "2025-05-12", "start": "16:00", "end": "18:00", "person": null, "description": "Swim Threshold"},
+    {"type": "absence", "date": "2025-05-12", "start": "12:30", "end": "15:00", "person": "ellen", "description": null},
+]
+
+Gib ausschließlich das JSON zurück ohne weiteren Text oder Formatierung.

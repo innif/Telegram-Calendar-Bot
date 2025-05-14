@@ -1,10 +1,14 @@
 import os
 import logging
+import json
+from datetime import datetime
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from openai import OpenAI
 from dotenv import load_dotenv
 import base64
+from icalendar import Calendar, Event
+import tempfile
 
 # Logging einrichten
 logging.basicConfig(
@@ -28,12 +32,12 @@ client = OpenAI(api_key=GPT_API_KEY)
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Sendet eine Nachricht, wenn der Befehl /start genutzt wird."""
     await update.message.reply_text(
-        'Hallo! Sende mir ein Bild und ich werde es analysieren.'
+        'Hallo! Sende mir ein Bild von deinem Wochenplan und ich werde es in eine iCalendar-Datei umwandeln.'
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Sendet eine Nachricht, wenn der Befehl /help genutzt wird."""
-    await update.message.reply_text('Sende mir einfach ein Bild und ich werde es analysieren.')
+    await update.message.reply_text('Sende mir einfach ein Bild deines Wochenplans und ich werde es in eine iCalendar-Datei umwandeln, die du in deinen Kalender importieren kannst.')
 
 def read_prompt_from_file(filename="prompt.txt"):
     """Liest den Prompt aus einer Textdatei."""
@@ -44,10 +48,87 @@ def read_prompt_from_file(filename="prompt.txt"):
         logger.error(f"Prompt-Datei {filename} nicht gefunden.")
         return "Was ist auf diesem Bild zu sehen?"
 
+def json_to_ical(json_data):
+    """Konvertiert JSON-Daten in eine iCalendar-Datei."""
+    cal = Calendar()
+    cal.add('prodid', '-//Wochenplan Bot//DE')
+    cal.add('version', '2.0')
+
+    for item in json_data:
+        event = Event()
+        
+        # Setze den Titel basierend auf Typ und Person
+        if item['type'] == 'appointment':
+            summary = f"Termin: {item['description'] or ''}"
+            if item['person']:
+                summary = f"{item['person']} - {summary}"
+        elif item['type'] == 'task':
+            summary = f"Aufgabe: {item['description'] or ''}"
+            if item['person']:
+                summary = f"{item['person']} - {summary}"
+        elif item['type'] == 'workout':
+            summary = f"Workout: {item['description'] or ''}"
+        elif item['type'] == 'absence':
+            summary = f"Abwesenheit: {item['person'] or ''}"
+            if item['description']:
+                summary += f" - {item['description']}"
+        else:
+            summary = item['description'] or 'Unbekannt'
+        
+        event.add('summary', summary)
+        
+        # Datum und Zeit
+        date_str = item['date']
+        start_str = item['start']
+        end_str = item['end']
+        
+        # Datum (erforderlich)
+        if date_str:
+            date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+            
+            # Falls Start- und Endzeit vorhanden
+            if start_str and end_str:
+                start_time = datetime.strptime(start_str, "%H:%M").time()
+                end_time = datetime.strptime(end_str, "%H:%M").time()
+                start_datetime = datetime.combine(date_obj.date(), start_time)
+                end_datetime = datetime.combine(date_obj.date(), end_time)
+                event.add('dtstart', start_datetime)
+                event.add('dtend', end_datetime)
+            # Falls nur Startzeit vorhanden
+            elif start_str:
+                start_time = datetime.strptime(start_str, "%H:%M").time()
+                start_datetime = datetime.combine(date_obj.date(), start_time)
+                # Standardmäßig 1 Stunde Dauer, wenn keine Endzeit angegeben
+                end_datetime = datetime.combine(date_obj.date(), start_time)
+                end_datetime = end_datetime.replace(hour=end_datetime.hour + 1)
+                event.add('dtstart', start_datetime)
+                event.add('dtend', end_datetime)
+            # Falls nur Datum vorhanden (ganztägige Ereignisse)
+            else:
+                event.add('dtstart', date_obj.date())
+                event.add('X-MICROSOFT-CDO-ALLDAYEVENT', 'TRUE')
+                event.add('X-APPLE-TRAVEL-ADVISORY-BEHAVIOR', 'AUTOMATIC')
+        
+        # Beschreibung
+        description = ""
+        if item['person'] and item['type'] != 'absence':
+            description += f"Person: {item['person']}\n"
+        if item['description'] and item['type'] == 'absence':
+            description += f"Beschreibung: {item['description']}\n"
+        if description:
+            event.add('description', description)
+        
+        # Kategorie basierend auf Typ
+        event.add('categories', [item['type'].capitalize()])
+        
+        cal.add_component(event)
+    
+    return cal.to_ical()
+
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Verarbeitet empfangene Fotos und sendet sie an die GPT API."""
     # Informiere den Benutzer, dass das Bild verarbeitet wird
-    await update.message.reply_text("Verarbeite dein Bild...")
+    processing_message = await update.message.reply_text("Verarbeite deinen Wochenplan...")
     
     try:
         # Hole das Foto mit der höchsten Auflösung
@@ -77,23 +158,54 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                     ]
                 }
             ],
-            max_tokens=500
+            max_tokens=1000
         )
         
-        # Extrahiere die Antwort von GPT
+        # Extrahiere die Antwort von GPT (sollte ein JSON sein)
         gpt_response = response.choices[0].message.content
-        await update.message.reply_text(gpt_response)
+        
+        try:
+            # Versuche, das JSON zu parsen
+            json_data = json.loads(gpt_response)
+            
+            # Erzeuge iCalendar-Datei
+            ical_data = json_to_ical(json_data)
+            
+            # Erstelle eine temporäre Datei für den iCalendar-Inhalt
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.ics') as tmp_file:
+                tmp_file_path = tmp_file.name
+                tmp_file.write(ical_data)
+            
+            # Sende die Datei an den Benutzer
+            await update.message.reply_document(
+                document=open(tmp_file_path, 'rb'),
+                filename='wochenplan.ics',
+                caption="Hier ist dein Wochenplan als iCalendar-Datei."
+            )
+            
+            # Lösche die temporäre Datei
+            os.unlink(tmp_file_path)
+            
+            # Lösche die Verarbeitungsnachricht
+            await processing_message.delete()
+            
+        except json.JSONDecodeError:
+            logger.error("Konnte JSON nicht parsen: " + gpt_response)
+            await processing_message.edit_text(
+                "Es gab ein Problem bei der Analyse deines Wochenplans. "
+                "Bitte versuche es mit einem klareren Bild."
+            )
     
     except Exception as e:
         logger.error(f"Fehler bei der Bildverarbeitung: {e}")
-        await update.message.reply_text(
+        await processing_message.edit_text(
             "Entschuldigung, es gab einen Fehler bei der Verarbeitung deines Bildes."
         )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Antwortet auf Textnachrichten."""
     await update.message.reply_text(
-        "Bitte sende mir ein Bild zur Analyse."
+        "Bitte sende mir ein Bild deines Wochenplans zur Analyse."
     )
 
 def main() -> None:
