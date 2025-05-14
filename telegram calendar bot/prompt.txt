@@ -17,11 +17,13 @@ Samstag - 17.05.25
 Sonntag - 18.05.25
 
 Das JSON-Ausgabeformat sieht wie folgt aus:
-[
-    {"type": "appointment", "date": "2025-05-12", "start": "14:00", "end": null, "person": "ellen", "description": "zahnarzt"},
-    {"type": "task", "date": "2025-05-12", "start": null, "end": null, "person": "finn", "description": "kochen"},
-    {"type": "workout", "date": "2025-05-12", "start": "16:00", "end": "18:00", "person": null, "description": "Swim Threshold"},
-    {"type": "absence", "date": "2025-05-12", "start": "12:30", "end": "15:00", "person": "ellen", "description": null},
-]
+{
+    "entries": [
+        {"type": "appointment", "date": "2025-05-12", "start": "14:00", "end": null, "person": "ellen", "description": "zahnarzt"},
+        {"type": "task", "date": "2025-05-12", "start": null, "end": null, "person": "finn", "description": "kochen"},
+        {"type": "workout", "date": "2025-05-12", "start": "16:00", "end": "18:00", "person": null, "description": "Swim Threshold"},
+        {"type": "absence", "date": "2025-05-12", "start": "12:30", "end": "15:00", "person": "ellen", "description": null},
+    ]
+}
 
 Gib ausschließlich das JSON zurück ohne weiteren Text oder Formatierung.

@@ -54,74 +54,119 @@ def json_to_ical(json_data):
     cal.add('prodid', '-//Wochenplan Bot//DE')
     cal.add('version', '2.0')
 
-    for item in json_data:
-        event = Event()
-        
-        # Setze den Titel basierend auf Typ und Person
-        if item['type'] == 'appointment':
-            summary = f"Termin: {item['description'] or ''}"
-            if item['person']:
-                summary = f"{item['person']} - {summary}"
-        elif item['type'] == 'task':
-            summary = f"Aufgabe: {item['description'] or ''}"
-            if item['person']:
-                summary = f"{item['person']} - {summary}"
-        elif item['type'] == 'workout':
-            summary = f"Workout: {item['description'] or ''}"
-        elif item['type'] == 'absence':
-            summary = f"Abwesenheit: {item['person'] or ''}"
-            if item['description']:
-                summary += f" - {item['description']}"
-        else:
-            summary = item['description'] or 'Unbekannt'
-        
-        event.add('summary', summary)
-        
-        # Datum und Zeit
-        date_str = item['date']
-        start_str = item['start']
-        end_str = item['end']
-        
-        # Datum (erforderlich)
-        if date_str:
-            date_obj = datetime.strptime(date_str, "%Y-%m-%d")
-            
-            # Falls Start- und Endzeit vorhanden
-            if start_str and end_str:
-                start_time = datetime.strptime(start_str, "%H:%M").time()
-                end_time = datetime.strptime(end_str, "%H:%M").time()
-                start_datetime = datetime.combine(date_obj.date(), start_time)
-                end_datetime = datetime.combine(date_obj.date(), end_time)
-                event.add('dtstart', start_datetime)
-                event.add('dtend', end_datetime)
-            # Falls nur Startzeit vorhanden
-            elif start_str:
-                start_time = datetime.strptime(start_str, "%H:%M").time()
-                start_datetime = datetime.combine(date_obj.date(), start_time)
-                # Standardmäßig 1 Stunde Dauer, wenn keine Endzeit angegeben
-                end_datetime = datetime.combine(date_obj.date(), start_time)
-                end_datetime = end_datetime.replace(hour=end_datetime.hour + 1)
-                event.add('dtstart', start_datetime)
-                event.add('dtend', end_datetime)
-            # Falls nur Datum vorhanden (ganztägige Ereignisse)
+    json_data = json_data["entries"] if "entries" in json_data else json_data
+
+    # Stelle sicher, dass json_data eine Liste ist
+    if not isinstance(json_data, list):
+        # Wenn es ein verschachteltes JSON ist, versuche, den richtigen Schlüssel zu finden
+        if isinstance(json_data, dict):
+            # Suche nach einem Listenwert in dem Dict
+            for key, value in json_data.items():
+                if isinstance(value, list) and len(value) > 0:
+                    json_data = value
+                    break
             else:
-                event.add('dtstart', date_obj.date())
-                event.add('X-MICROSOFT-CDO-ALLDAYEVENT', 'TRUE')
-                event.add('X-APPLE-TRAVEL-ADVISORY-BEHAVIOR', 'AUTOMATIC')
-        
-        # Beschreibung
-        description = ""
-        if item['person'] and item['type'] != 'absence':
-            description += f"Person: {item['person']}\n"
-        if item['description'] and item['type'] == 'absence':
-            description += f"Beschreibung: {item['description']}\n"
-        if description:
-            event.add('description', description)
-        
-        # Kategorie basierend auf Typ
-        event.add('categories', [item['type'].capitalize()])
-        
-        cal.add_component(event)
+                # Wenn kein Listenwert gefunden wurde, packe das Dict in eine Liste
+                json_data = [json_data]
+        else:
+            # Wenn es weder Liste noch Dict ist, erstelle eine leere Liste
+            json_data = []
+
+    for item in json_data:
+        try:
+            event = Event()
+            
+            # Standardwerte für fehlende Felder
+            item_type = item.get('type', 'unknown')
+            person = item.get('person')
+            description = item.get('description')
+            date_str = item.get('date')
+            start_str = item.get('start')
+            end_str = item.get('end')
+            
+            # Setze den Titel basierend auf Typ und Person
+            if item_type == 'appointment':
+                summary = f"Termin: {description or ''}"
+                if person:
+                    summary = f"{person} - {summary}"
+            elif item_type == 'task':
+                summary = f"Aufgabe: {description or ''}"
+                if person:
+                    summary = f"{person} - {summary}"
+            elif item_type == 'workout':
+                summary = f"Workout: {description or ''}"
+            elif item_type == 'absence':
+                summary = f"Abwesenheit: {person or ''}"
+                if description:
+                    summary += f" - {description}"
+            else:
+                summary = description or item.get('summary', 'Unbekannt')
+            
+            event.add('summary', summary)
+            
+            # Datum und Zeit
+            # Datum (erforderlich)
+            if date_str:
+                try:
+                    date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+                    
+                    # Falls Start- und Endzeit vorhanden
+                    if start_str and end_str:
+                        try:
+                            start_time = datetime.strptime(start_str, "%H:%M").time()
+                            end_time = datetime.strptime(end_str, "%H:%M").time()
+                            start_datetime = datetime.combine(date_obj.date(), start_time)
+                            end_datetime = datetime.combine(date_obj.date(), end_time)
+                            event.add('dtstart', start_datetime)
+                            event.add('dtend', end_datetime)
+                        except ValueError:
+                            # Wenn die Zeitformatierung fehlschlägt, als ganztägiges Ereignis behandeln
+                            event.add('dtstart', date_obj.date())
+                            event.add('X-MICROSOFT-CDO-ALLDAYEVENT', 'TRUE')
+                    # Falls nur Startzeit vorhanden
+                    elif start_str:
+                        try:
+                            start_time = datetime.strptime(start_str, "%H:%M").time()
+                            start_datetime = datetime.combine(date_obj.date(), start_time)
+                            # Standardmäßig 1 Stunde Dauer, wenn keine Endzeit angegeben
+                            end_datetime = datetime.combine(date_obj.date(), start_time)
+                            end_datetime = end_datetime.replace(hour=end_datetime.hour + 1)
+                            event.add('dtstart', start_datetime)
+                            event.add('dtend', end_datetime)
+                        except ValueError:
+                            # Wenn die Zeitformatierung fehlschlägt, als ganztägiges Ereignis behandeln
+                            event.add('dtstart', date_obj.date())
+                            event.add('X-MICROSOFT-CDO-ALLDAYEVENT', 'TRUE')
+                    # Falls nur Datum vorhanden (ganztägige Ereignisse)
+                    else:
+                        event.add('dtstart', date_obj.date())
+                        event.add('X-MICROSOFT-CDO-ALLDAYEVENT', 'TRUE')
+                        event.add('X-APPLE-TRAVEL-ADVISORY-BEHAVIOR', 'AUTOMATIC')
+                except ValueError:
+                    # Wenn das Datumsformat falsch ist, überspringen wir diesen Eintrag
+                    logger.warning(f"Ungültiges Datumsformat: {date_str} für Eintrag: {item}")
+                    continue
+            else:
+                # Ohne Datum ist der Eintrag nicht gültig, überspringen
+                logger.warning(f"Kein Datum für Eintrag: {item}")
+                continue
+            
+            # Beschreibung
+            description_text = ""
+            if person and item_type != 'absence':
+                description_text += f"Person: {person}\n"
+            if description and item_type == 'absence':
+                description_text += f"Beschreibung: {description}\n"
+            if description_text:
+                event.add('description', description_text)
+            
+            # Kategorie basierend auf Typ
+            event.add('categories', [item_type.capitalize()])
+            
+            cal.add_component(event)
+        except Exception as e:
+            logger.error(f"Fehler beim Erstellen eines Kalendereintrags: {e} für Eintrag: {item}")
+            continue
     
     return cal.to_ical()
 
@@ -143,8 +188,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         
         # Verwende die OpenAI-Bibliothek für die Anfrage
         response = client.chat.completions.create(
-            model="gpt-4.1-mini",
+            model="gpt-4.1",
             messages=[
+                {
+                    "role": "system",
+                    "content": "Du bist ein Assistent, der Wochenpläne aus Bildern in strukturiertes JSON umwandelt. Gib AUSSCHLIESSLICH das JSON zurück ohne Markdown-Formatierung oder zusätzlichen Text."
+                },
                 {
                     "role": "user",
                     "content": [
@@ -158,15 +207,31 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                     ]
                 }
             ],
-            max_tokens=1000
+            response_format={"type": "json_object"}
         )
         
         # Extrahiere die Antwort von GPT (sollte ein JSON sein)
         gpt_response = response.choices[0].message.content
         
+        # Bereinige die Antwort von möglichen Markdown-Code-Blöcken
+        cleaned_response = gpt_response
+        
+        # Entferne Markdown-Code-Block-Formatierung, falls vorhanden
+        if "```json" in cleaned_response and "```" in cleaned_response:
+            # Extrahiere den Inhalt zwischen den Code-Block-Markierungen
+            start_index = cleaned_response.find("```json") + len("```json")
+            end_index = cleaned_response.rfind("```")
+            if start_index < end_index:
+                cleaned_response = cleaned_response[start_index:end_index].strip()
+        elif cleaned_response.startswith("```") and cleaned_response.endswith("```"):
+            # Wenn es nur ``` ohne Spezifikation ist
+            cleaned_response = cleaned_response[3:-3].strip()
+        
+        logger.info(f"Bereinigte Antwort: {cleaned_response[:100]}...")  # Logge die ersten 100 Zeichen
+        
         try:
             # Versuche, das JSON zu parsen
-            json_data = json.loads(gpt_response)
+            json_data = json.loads(cleaned_response)
             
             # Erzeuge iCalendar-Datei
             ical_data = json_to_ical(json_data)
@@ -189,10 +254,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             # Lösche die Verarbeitungsnachricht
             await processing_message.delete()
             
-        except json.JSONDecodeError:
-            logger.error("Konnte JSON nicht parsen: " + gpt_response)
+        except json.JSONDecodeError as e:
+            logger.error(f"Konnte JSON nicht parsen: {e}\nAntwort: {cleaned_response[:200]}")
             await processing_message.edit_text(
                 "Es gab ein Problem bei der Analyse deines Wochenplans. "
+                "Die Antwort konnte nicht als JSON-Format erkannt werden. "
                 "Bitte versuche es mit einem klareren Bild."
             )
     
